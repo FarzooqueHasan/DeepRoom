@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { createPageUrl } from '@/utils';
 import { base44 } from '@/api/base44Client';
 import { useAuth } from '@/lib/AuthContext';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Plus, Users, ArrowRight, Clock, Shield, Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { toast } from 'react-hot-toast';
 
 export default function Home() {
   const { user, openAuthModal, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
   const [joinCode, setJoinCode] = useState('');
   const [newRoomName, setNewRoomName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
@@ -21,21 +22,42 @@ export default function Home() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
 
+  // Subscribe to real-time room updates across browsers
+  useEffect(() => {
+    const unsubscribe = base44.entities.Room.subscribe(() => {
+      queryClient.invalidateQueries({ queryKey: ['myRooms'] });
+    });
+    return () => unsubscribe();
+  }, [queryClient]);
+
   const { data: myRooms = [], refetch: refetchRooms } = useQuery({
-    queryKey: ['myRooms', user?.id],
+    queryKey: ['myRooms', user?.id, user?.email],
     queryFn: async () => {
       if (!user) return [];
       try {
         const allRooms = await base44.entities.Room.list();
-        return allRooms.filter(room => 
-          room.host_id === user.id || (room.members || []).includes(user.id)
-        );
+        const userIdentifier = user.id;
+        const userEmail = user.email?.toLowerCase();
+        
+        return allRooms.filter(room => {
+          // Check by host ID or host Email
+          if (room.host_id && room.host_id === userIdentifier) return true;
+          if (userEmail && room.host_email && room.host_email.toLowerCase() === userEmail) return true;
+          
+          // Check in members array (could be IDs or emails)
+          const membersList = room.members || [];
+          if (membersList.includes(userIdentifier)) return true;
+          if (userEmail && membersList.some(m => typeof m === 'string' && m.toLowerCase() === userEmail)) return true;
+
+          return false;
+        });
       } catch (err) {
         console.warn('[Home] Failed to list rooms:', err);
         return [];
       }
     },
-    enabled: !!user?.id,
+    enabled: !!(user?.id || user?.email),
+    refetchInterval: 3000,
   });
 
   const { data: userStats } = useQuery({
@@ -73,7 +95,8 @@ export default function Home() {
         name: newRoomName.trim(),
         invite_code: generateInviteCode(),
         host_id: user.id,
-        members: [user.id],
+        host_email: user.email,
+        members: [user.id, user.email].filter(Boolean),
         is_shared_session: false,
         active_timer_type: 'none'
       });
@@ -119,21 +142,21 @@ export default function Home() {
       const rooms = await base44.entities.Room.filter({ invite_code: joinCode.trim().toUpperCase() });
       if (rooms.length > 0) {
         const room = rooms[0];
-        if (!(room.members || []).includes(user.id)) {
-          await base44.entities.Room.update(room.id, {
-            members: [...(room.members || []), user.id]
-          });
-          
-          // Create member status for new member
-          await base44.entities.RoomMemberStatus.create({
-            user_id: user.id,
-            user_email: user.email,
-            user_name: user.full_name,
-            room_id: room.id,
-            status: 'offline',
-            last_active: new Date().toISOString()
-          });
-        }
+        const updatedMembers = Array.from(new Set([...(room.members || []), user.id, user.email].filter(Boolean)));
+        await base44.entities.Room.update(room.id, {
+          members: updatedMembers
+        });
+        
+        // Create member status for new member
+        await base44.entities.RoomMemberStatus.create({
+          user_id: user.id,
+          user_email: user.email,
+          user_name: user.full_name,
+          room_id: room.id,
+          status: 'offline',
+          last_active: new Date().toISOString()
+        });
+
         setJoinCode('');
         setJoinDialogOpen(false);
         refetchRooms();

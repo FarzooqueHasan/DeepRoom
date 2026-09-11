@@ -62,6 +62,7 @@ export default function StudyRoom() {
       return res[0] || null;
     },
     enabled: !!roomId,
+    refetchInterval: 2000,
   });
 
   const { data: memberStatuses = [], refetch: refetchMembers } = useQuery({
@@ -130,13 +131,19 @@ export default function StudyRoom() {
   // Enable notifications
   useRoomNotifications(roomId, user?.id);
 
-  // Subscribe to real-time updates
+  // Subscribe to real-time updates for members and room status
   useEffect(() => {
     if (!roomId) return;
-    const unsubscribe = base44.entities.RoomMemberStatus.subscribe(() => {
+    const unsubMembers = base44.entities.RoomMemberStatus.subscribe(() => {
       queryClient.invalidateQueries({ queryKey: ['memberStatuses', roomId] });
     });
-    return () => unsubscribe();
+    const unsubRoom = base44.entities.Room.subscribe(() => {
+      queryClient.invalidateQueries({ queryKey: ['room', roomId] });
+    });
+    return () => {
+      unsubMembers();
+      unsubRoom();
+    };
   }, [roomId, queryClient]);
 
   const updateMemberStatus = useCallback(async (status, sessionData = {}) => {
@@ -602,9 +609,9 @@ export default function StudyRoom() {
                 onSessionEnd={handleSessionEnd}
                 onBreakStart={handleBreakStart}
                 onBreakEnd={handleBreakEnd}
-                isSharedSession={room.is_shared_session}
-                sharedTimerStart={room.timer_started_at}
-                sharedDuration={room.timer_duration_minutes}
+                isSharedSession={Boolean(room?.is_shared_session)}
+                sharedTimerStart={room?.timer_started_at || null}
+                sharedDuration={room?.timer_duration_minutes || null}
               />
             </motion.div>
 
