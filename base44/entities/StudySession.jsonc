@@ -1,0 +1,94 @@
+{
+  "name": "StudySession",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "description": "User who owns this session"
+    },
+    "user_email": {
+      "type": "string"
+    },
+    "user_name": {
+      "type": "string"
+    },
+    "room_id": {
+      "type": "string",
+      "description": "Room where session took place"
+    },
+    "subject": {
+      "type": "string",
+      "description": "What the user is studying"
+    },
+    "start_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "end_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_minutes": {
+      "type": "number"
+    },
+    "focus_score": {
+      "type": "number",
+      "description": "0-100 focus percentage from camera tracking"
+    },
+    "camera_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "tab_switches": {
+      "type": "number",
+      "default": 0
+    },
+    "inactive_periods": {
+      "type": "number",
+      "default": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "completed",
+        "abandoned"
+      ],
+      "default": "active"
+    },
+    "breaks_taken": {
+      "type": "number",
+      "default": 0
+    },
+    "break_duration_minutes": {
+      "type": "number",
+      "default": 0
+    },
+    "tasks_completed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of tasks completed during session"
+    },
+    "ai_summary": {
+      "type": "string",
+      "description": "AI-generated session summary"
+    },
+    "points_earned": {
+      "type": "number",
+      "default": 0
+    },
+    "verification_photos": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "URLs of verification photos captured during session"
+    }
+  },
+  "required": [
+    "user_id",
+    "room_id"
+  ]
+}

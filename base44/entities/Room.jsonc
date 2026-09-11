@@ -1,0 +1,80 @@
+{
+  "name": "Room",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Room name"
+    },
+    "invite_code": {
+      "type": "string",
+      "description": "Unique invite code for joining"
+    },
+    "host_id": {
+      "type": "string",
+      "description": "User ID of the room host"
+    },
+    "members": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Array of member user IDs"
+    },
+    "is_shared_session": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether timer is synchronized for all members"
+    },
+    "require_camera": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether camera tracking is required for all members"
+    },
+    "allow_breaks": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether members can take breaks"
+    },
+    "active_timer_type": {
+      "type": "string",
+      "enum": [
+        "pomodoro",
+        "50_10",
+        "deep_work",
+        "custom",
+        "none"
+      ],
+      "default": "none"
+    },
+    "timer_started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "timer_duration_minutes": {
+      "type": "number"
+    },
+    "shared_spotify_enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether room uses shared Spotify playback"
+    },
+    "shared_spotify_uri": {
+      "type": "string",
+      "description": "Currently playing Spotify track/playlist URI"
+    },
+    "shared_spotify_position": {
+      "type": "number",
+      "description": "Playback position in milliseconds"
+    },
+    "shared_spotify_updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "name",
+    "invite_code",
+    "host_id"
+  ]
+}

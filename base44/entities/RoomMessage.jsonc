@@ -1,0 +1,31 @@
+{
+  "name": "RoomMessage",
+  "type": "object",
+  "properties": {
+    "room_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "user_name": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "message_type": {
+      "type": "string",
+      "enum": [
+        "text",
+        "system"
+      ],
+      "default": "text"
+    }
+  },
+  "required": [
+    "room_id",
+    "user_id",
+    "message"
+  ]
+}

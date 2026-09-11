@@ -1,0 +1,19 @@
+{
+  "name": "WhiteboardData",
+  "type": "object",
+  "properties": {
+    "room_id": {
+      "type": "string"
+    },
+    "drawing_data": {
+      "type": "string",
+      "description": "Serialized drawing paths and strokes"
+    },
+    "last_updated_by": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "room_id"
+  ]
+}

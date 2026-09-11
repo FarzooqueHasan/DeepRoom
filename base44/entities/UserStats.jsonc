@@ -1,0 +1,65 @@
+{
+  "name": "UserStats",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "user_email": {
+      "type": "string"
+    },
+    "user_name": {
+      "type": "string"
+    },
+    "total_study_minutes": {
+      "type": "number",
+      "default": 0
+    },
+    "verified_focus_minutes": {
+      "type": "number",
+      "default": 0
+    },
+    "current_streak": {
+      "type": "number",
+      "default": 0
+    },
+    "last_study_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "weekly_study_minutes": {
+      "type": "number",
+      "default": 0
+    },
+    "weekly_verified_minutes": {
+      "type": "number",
+      "default": 0
+    },
+    "reputation_score": {
+      "type": "number",
+      "default": 0
+    },
+    "total_points": {
+      "type": "number",
+      "default": 0,
+      "description": "Gamification points earned"
+    },
+    "level": {
+      "type": "number",
+      "default": 1,
+      "description": "User level based on points"
+    },
+    "total_sessions": {
+      "type": "number",
+      "default": 0
+    },
+    "longest_streak": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "user_id",
+    "user_email"
+  ]
+}

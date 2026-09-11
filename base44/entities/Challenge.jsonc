@@ -1,0 +1,57 @@
+{
+  "name": "Challenge",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Challenge title"
+    },
+    "description": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "weekly",
+        "monthly",
+        "special"
+      ],
+      "default": "weekly"
+    },
+    "goal_type": {
+      "type": "string",
+      "enum": [
+        "study_minutes",
+        "focus_minutes",
+        "sessions",
+        "streak"
+      ],
+      "description": "What to measure"
+    },
+    "goal_value": {
+      "type": "number",
+      "description": "Target value to achieve"
+    },
+    "points_reward": {
+      "type": "number",
+      "default": 100
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "title",
+    "goal_type",
+    "goal_value"
+  ]
+}

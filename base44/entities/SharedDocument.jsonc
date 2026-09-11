@@ -1,0 +1,27 @@
+{
+  "name": "SharedDocument",
+  "type": "object",
+  "properties": {
+    "room_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string",
+      "description": "Document content in markdown or plain text"
+    },
+    "last_edited_by": {
+      "type": "string"
+    },
+    "last_edited_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "room_id",
+    "title"
+  ]
+}

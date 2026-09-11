@@ -1,0 +1,28 @@
+{
+  "name": "ChallengeProgress",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "challenge_id": {
+      "type": "string"
+    },
+    "current_progress": {
+      "type": "number",
+      "default": 0
+    },
+    "is_completed": {
+      "type": "boolean",
+      "default": false
+    },
+    "completed_date": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "user_id",
+    "challenge_id"
+  ]
+}

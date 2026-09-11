@@ -1,0 +1,57 @@
+{
+  "name": "RoomMemberStatus",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "user_email": {
+      "type": "string"
+    },
+    "user_name": {
+      "type": "string"
+    },
+    "room_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "studying",
+        "break",
+        "offline"
+      ],
+      "default": "offline"
+    },
+    "current_subject": {
+      "type": "string"
+    },
+    "session_start": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "focus_score": {
+      "type": "number"
+    },
+    "camera_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "camera_share_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "camera_frame_url": {
+      "type": "string",
+      "description": "Latest captured camera frame for sharing"
+    },
+    "last_active": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "user_id",
+    "room_id"
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "name": "Badge",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "badge_type": {
+      "type": "string",
+      "enum": [
+        "first_session",
+        "10_hours",
+        "50_hours",
+        "100_hours",
+        "500_hours",
+        "7_day_streak",
+        "30_day_streak",
+        "100_day_streak",
+        "night_owl",
+        "early_bird",
+        "focus_master",
+        "marathon_runner"
+      ]
+    },
+    "earned_date": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "required": [
+    "user_id",
+    "badge_type"
+  ]
+}
