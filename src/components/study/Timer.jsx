@@ -14,6 +14,8 @@ export default function Timer({
   preset = 'pomodoro', 
   customMinutes = null,
   onSessionStart,
+  onSessionPause,
+  onSessionResume,
   onSessionEnd,
   onBreakStart,
   onBreakEnd,
@@ -27,6 +29,7 @@ export default function Timer({
   const [isBreak, setIsBreak] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState(null);
   const [breakStartTime, setBreakStartTime] = useState(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   const startBreakTracking = () => {
     setBreakStartTime(new Date());
@@ -74,23 +77,35 @@ export default function Timer({
       const initial = getInitialTime();
       setTimeLeft(initial);
       setTotalTime(initial);
+      setElapsedSeconds(0);
     }
   }, [preset, customMinutes, getInitialTime, isSharedSession]);
 
+  // Main countdown & elapsed ticking interval
   useEffect(() => {
     let interval;
-    if (isRunning && isContinuous) {
+    if (isRunning) {
       interval = setInterval(() => {
-        setTimeLeft(prev => prev + 1);
+        if (!isBreak) {
+          setElapsedSeconds(prev => prev + 1);
+        }
+        if (isContinuous) {
+          setTimeLeft(prev => prev + 1);
+        } else if (timeLeft > 0) {
+          setTimeLeft(prev => Math.max(0, prev - 1));
+        }
       }, 1000);
-    } else if (isRunning && timeLeft > 0) {
-      interval = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
-      }, 1000);
-    } else if (timeLeft === 0 && isRunning && !isContinuous) {
+    }
+    return () => clearInterval(interval);
+  }, [isRunning, isContinuous, timeLeft, isBreak]);
+
+  // Session completion when countdown reaches zero
+  useEffect(() => {
+    if (timeLeft === 0 && isRunning && !isContinuous && totalTime > 0) {
       setIsRunning(false);
       if (!isBreak) {
-        onSessionEnd?.(sessionStartTime, new Date());
+        const completedSeconds = elapsedSeconds > 0 ? elapsedSeconds : totalTime;
+        onSessionEnd?.(sessionStartTime, new Date(), completedSeconds);
         // Auto start break
         setIsBreak(true);
         setTimeLeft(getBreakTime());
@@ -99,25 +114,40 @@ export default function Timer({
       } else {
         endBreakTracking();
         setIsBreak(false);
-        setTimeLeft(getInitialTime());
-        setTotalTime(getInitialTime());
+        const initial = getInitialTime();
+        setTimeLeft(initial);
+        setTotalTime(initial);
+        setElapsedSeconds(0);
+        setSessionStartTime(null);
       }
     }
-    return () => clearInterval(interval);
-  }, [isRunning, timeLeft, isBreak, isContinuous, getBreakTime, getInitialTime, onSessionEnd, onBreakStart, sessionStartTime]);
+  }, [timeLeft, isRunning, isContinuous, totalTime, isBreak, elapsedSeconds, sessionStartTime, getBreakTime, getInitialTime, onSessionEnd]);
 
   const toggleTimer = () => {
-    if (!isRunning && !isBreak && !sessionStartTime) {
-      const now = new Date();
-      setSessionStartTime(now);
-      onSessionStart?.(now);
+    if (!isRunning) {
+      // Start or Resume
+      if (!isBreak) {
+        if (!sessionStartTime) {
+          const now = new Date();
+          setSessionStartTime(now);
+          onSessionStart?.(now);
+        } else {
+          onSessionResume?.(elapsedSeconds);
+        }
+      }
+      setIsRunning(true);
+    } else {
+      // Pause
+      setIsRunning(false);
+      if (!isBreak) {
+        onSessionPause?.(elapsedSeconds);
+      }
     }
-    setIsRunning(!isRunning);
   };
 
   const resetTimer = () => {
-    if (sessionStartTime && isRunning && !isBreak) {
-      onSessionEnd?.(sessionStartTime, new Date());
+    if (sessionStartTime && !isBreak && elapsedSeconds > 0) {
+      onSessionEnd?.(sessionStartTime, new Date(), elapsedSeconds);
     }
     if (isBreak) endBreakTracking();
     setIsRunning(false);
@@ -126,11 +156,12 @@ export default function Timer({
     setTimeLeft(initial);
     setTotalTime(initial);
     setSessionStartTime(null);
+    setElapsedSeconds(0);
   };
 
   const endSession = () => {
-    if (sessionStartTime && isRunning && !isBreak) {
-      onSessionEnd?.(sessionStartTime, new Date());
+    if (sessionStartTime && !isBreak && elapsedSeconds > 0) {
+      onSessionEnd?.(sessionStartTime, new Date(), elapsedSeconds);
     }
     if (isBreak) endBreakTracking();
     setIsRunning(false);
@@ -139,6 +170,7 @@ export default function Timer({
     setTimeLeft(initial);
     setTotalTime(initial);
     setSessionStartTime(null);
+    setElapsedSeconds(0);
   };
 
   const formatTime = (seconds) => {

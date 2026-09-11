@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 const StatusIndicator = ({ status }) => {
   const colors = {
     studying: 'bg-emerald-500',
+    paused: 'bg-amber-500',
     break: 'bg-yellow-500',
     offline: 'bg-zinc-600'
   };
@@ -14,10 +15,26 @@ const StatusIndicator = ({ status }) => {
   );
 };
 
-const StatusTimer = ({ sessionStartedAt, lastActive, status }) => {
+const StatusTimer = ({ sessionStartedAt, lastActive, status, elapsedSeconds }) => {
   const [elapsed, setElapsed] = useState('');
 
   useEffect(() => {
+    // If paused, freeze elapsed time display immediately!
+    if (status === 'paused') {
+      const secs = elapsedSeconds || 0;
+      const hours = Math.floor(secs / 3600);
+      const minutes = Math.floor((secs % 3600) / 60);
+      const seconds = secs % 60;
+      if (hours > 0) {
+        setElapsed(`${hours}h ${minutes}m`);
+      } else if (minutes > 0) {
+        setElapsed(`${minutes}m ${seconds}s`);
+      } else {
+        setElapsed(`${seconds}s`);
+      }
+      return;
+    }
+
     // When studying, base on sessionStartedAt so it tallies with central timer and never resets on button clicks
     const baseTime = (status === 'studying' && sessionStartedAt) ? sessionStartedAt : lastActive;
     if (!baseTime) {
@@ -61,13 +78,13 @@ const StatusTimer = ({ sessionStartedAt, lastActive, status }) => {
     updateElapsed();
     const interval = setInterval(updateElapsed, 1000);
     return () => clearInterval(interval);
-  }, [sessionStartedAt, lastActive, status]);
+  }, [sessionStartedAt, lastActive, status, elapsedSeconds]);
 
   if (!elapsed) return null;
 
   return (
     <div className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
-      <Clock className="w-3 h-3 text-emerald-500" />
+      <Clock className={`w-3 h-3 ${status === 'paused' ? 'text-amber-500' : status === 'break' ? 'text-yellow-500' : status === 'studying' ? 'text-emerald-500' : 'text-zinc-600'}`} />
       {elapsed}
     </div>
   );
@@ -94,12 +111,13 @@ export default function MemberList({ members = [], currentUserId }) {
   const [minimizedCameras, setMinimizedCameras] = useState({});
   
   const sortedMembers = [...members].sort((a, b) => {
-    const statusOrder = { studying: 0, break: 1, offline: 2 };
-    return (statusOrder[a.status] || 2) - (statusOrder[b.status] || 2);
+    const statusOrder = { studying: 0, paused: 1, break: 2, offline: 3 };
+    return (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
   });
 
   const statusLabels = {
     studying: 'Studying',
+    paused: 'Paused',
     break: 'Break',
     offline: 'Offline'
   };
@@ -156,13 +174,14 @@ export default function MemberList({ members = [], currentUserId }) {
                       
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-xs text-zinc-500">
-                          {statusLabels[member.status]}
+                          {statusLabels[member.status] || member.status || 'Offline'}
                         </span>
                         <span className="text-zinc-700">•</span>
                         <StatusTimer 
                           sessionStartedAt={member.session_started_at}
                           lastActive={member.last_active} 
                           status={member.status}
+                          elapsedSeconds={member.elapsed_seconds}
                         />
                       </div>
                       

@@ -40,7 +40,9 @@ export default function StudyRoom() {
   const [cameraEnabled, setCameraEnabled] = useState(false);
   const [focusScore, setFocusScore] = useState(100);
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [currentSession, setCurrentSession] = useState(null);
+  const currentSessionRef = useRef(null);
   const [copied, setCopied] = useState(false);
   const [tabSwitches, setTabSwitches] = useState(0);
   const [inactivePeriods, setInactivePeriods] = useState(0);
@@ -243,22 +245,24 @@ export default function StudyRoom() {
     if (!user || !roomId) return;
     
     if (isSessionActive) {
-      updateMemberStatus('studying', { focus_score: focusScore });
+      if (!isPaused) {
+        updateMemberStatus('studying', { focus_score: focusScore });
+      }
     } else {
       updateMemberStatus('offline');
     }
-  }, [isSessionActive, cameraEnabled, cameraSharing, user, roomId, focusScore, updateMemberStatus]);
+  }, [isSessionActive, isPaused, cameraEnabled, cameraSharing, user, roomId, focusScore, updateMemberStatus]);
 
-  // Update status periodically when active
+  // Update status periodically when active (only when actively studying, not paused)
   useEffect(() => {
-    if (!isSessionActive || !user) return;
+    if (!isSessionActive || isPaused || !user) return;
     
     const interval = setInterval(() => {
       updateMemberStatus('studying', { focus_score: focusScore });
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [isSessionActive, user, focusScore, updateMemberStatus]);
+  }, [isSessionActive, isPaused, user, focusScore, updateMemberStatus]);
 
   // Keep latest updateMemberStatus in a ref so the leave effect only runs on enter/leave
   const updateMemberStatusRef = useRef(updateMemberStatus);
@@ -269,13 +273,13 @@ export default function StudyRoom() {
     if (!user || !roomId) return;
     
     const handleBeforeUnload = () => {
-      updateMemberStatusRef.current('offline', { session_started_at: null, camera_frame_url: null });
+      updateMemberStatusRef.current('offline', { session_started_at: null, camera_frame_url: null, elapsed_seconds: 0 });
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      updateMemberStatusRef.current('offline', { session_started_at: null, camera_frame_url: null });
+      updateMemberStatusRef.current('offline', { session_started_at: null, camera_frame_url: null, elapsed_seconds: 0 });
     };
   }, [user, roomId]);
 
@@ -283,6 +287,7 @@ export default function StudyRoom() {
     if (!user || !roomId) return;
     
     setIsSessionActive(true);
+    setIsPaused(false);
     const startIso = startTime ? new Date(startTime).toISOString() : new Date().toISOString();
     const session = await base44.entities.StudySession.create({
       user_id: user.id,
@@ -295,27 +300,92 @@ export default function StudyRoom() {
       status: 'active'
     });
     setCurrentSession(session);
+    currentSessionRef.current = session;
     await updateMemberStatus('studying', { 
       session_started_at: startIso,
-      current_subject: subject || 'General Focus'
+      current_subject: subject || 'General Focus',
+      elapsed_seconds: 0
     });
   };
 
-  const handleSessionEnd = async (startTime, endTime) => {
-    if (!user || !currentSession) return;
+  const handleSessionPause = useCallback(async (elapsedSeconds) => {
+    if (!user || !roomId) return;
+    setIsPaused(true);
+    await updateMemberStatus('paused', { elapsed_seconds: elapsedSeconds });
+  }, [user, roomId, updateMemberStatus]);
+
+  const handleSessionResume = useCallback(async (elapsedSeconds) => {
+    if (!user || !roomId) return;
+    setIsPaused(false);
+    const newStartedAt = new Date(Date.now() - (elapsedSeconds || 0) * 1000).toISOString();
+    await updateMemberStatus('studying', { 
+      session_started_at: newStartedAt,
+      focus_score: focusScore 
+    });
+  }, [user, roomId, focusScore, updateMemberStatus]);
+
+  const handleSessionEnd = async (startTime, endTime, actualSeconds = null) => {
+    if (!user || !roomId) return;
     
-    const durationMinutes = Math.round((endTime - startTime) / 60000);
+    // Calculate duration accurately
+    let durationSeconds = actualSeconds;
+    if (typeof durationSeconds !== 'number' || durationSeconds <= 0) {
+      if (startTime && endTime) {
+        durationSeconds = Math.max(1, Math.round((new Date(endTime) - new Date(startTime)) / 1000));
+      } else {
+        durationSeconds = 60;
+      }
+    }
+    // Any session of at least 30 seconds counts as at least 1 minute
+    const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
     const verifiedMinutes = cameraEnabled && focusScore >= 60 ? durationMinutes : 0;
     
     // Calculate points: 10 per study minute, 5 per verified minute, 100 bonus per session
     const pointsEarned = durationMinutes * 10 + verifiedMinutes * 5 + 100;
     
+    // Find or recover active session
+    let sessionToUpdate = currentSessionRef.current || currentSession;
+    if (!sessionToUpdate) {
+      try {
+        const activeSessions = await base44.entities.StudySession.filter({
+          user_id: user.id,
+          room_id: roomId,
+          status: 'active'
+        });
+        if (activeSessions.length > 0) {
+          sessionToUpdate = activeSessions.sort((a, b) => new Date(b.start_time || 0) - new Date(a.start_time || 0))[0];
+        }
+      } catch (e) {
+        console.warn('Fallback active session query:', e);
+      }
+    }
+
+    const startIso = startTime ? new Date(startTime).toISOString() : (sessionToUpdate?.start_time || new Date(Date.now() - durationSeconds * 1000).toISOString());
+    const endIso = endTime ? new Date(endTime).toISOString() : new Date().toISOString();
+
+    if (!sessionToUpdate) {
+      try {
+        sessionToUpdate = await base44.entities.StudySession.create({
+          user_id: user.id,
+          user_email: user.email,
+          user_name: user.full_name,
+          room_id: roomId,
+          subject: subject || 'General Focus',
+          start_time: startIso,
+          camera_enabled: cameraEnabled,
+          status: 'active'
+        });
+      } catch (e) {
+        console.error('Failed to create fallback session:', e);
+      }
+    }
+
     // Generate AI summary
     let aiSummary = '';
     try {
       const prompt = `Create a brief, motivational summary for this study session. Capture the total study duration, break times, and subjects studied.
       - Subject: ${subject || 'General Study'}
-      - Total Study Duration: ${durationMinutes} minutes
+      - Total Study Duration: ${durationMinutes} minutes (${durationSeconds}s)
       - Break Time: ${totalBreakMinutes} minutes across ${breaksTaken} break(s)
       - Focus Score: ${focusScore}%
       - Camera Tracking: ${cameraEnabled ? 'Yes' : 'No'}
@@ -326,94 +396,106 @@ export default function StudyRoom() {
       
       aiSummary = await base44.integrations.Core.InvokeLLM({ prompt });
     } catch (error) {
-      aiSummary = `Studied ${subject || 'general topics'} for ${durationMinutes} minutes${totalBreakMinutes > 0 ? ` with ${totalBreakMinutes}m of breaks (${breaksTaken} break${breaksTaken > 1 ? 's' : ''})` : ''}${cameraEnabled ? ` at ${focusScore}% focus` : ''}. Keep up the momentum!`;
+      aiSummary = `Studied ${subject || 'general topics'} for ${durationMinutes} minute${durationMinutes > 1 ? 's' : ''}${totalBreakMinutes > 0 ? ` with ${totalBreakMinutes}m of breaks` : ''}${cameraEnabled ? ` at ${focusScore}% focus` : ''}. Keep up the great work!`;
     }
     
-    await base44.entities.StudySession.update(currentSession.id, {
-      end_time: endTime.toISOString(),
-      duration_minutes: durationMinutes,
-      focus_score: focusScore,
-      tab_switches: tabSwitches,
-      inactive_periods: inactivePeriods,
-      status: 'completed',
-      breaks_taken: breaksTaken,
-      break_duration_minutes: totalBreakMinutes,
-      ai_summary: aiSummary,
-      points_earned: pointsEarned,
-      verification_photos: verificationPhotosRef.current
-    });
+    if (sessionToUpdate?.id) {
+      await base44.entities.StudySession.update(sessionToUpdate.id, {
+        end_time: endIso,
+        duration_minutes: durationMinutes,
+        duration_seconds: durationSeconds,
+        focus_score: focusScore,
+        tab_switches: tabSwitches,
+        inactive_periods: inactivePeriods,
+        status: 'completed',
+        breaks_taken: breaksTaken,
+        break_duration_minutes: totalBreakMinutes,
+        ai_summary: aiSummary,
+        points_earned: pointsEarned,
+        verification_photos: verificationPhotosRef.current
+      });
+    }
 
     // Update user stats with gamification
-    const existingStats = await base44.entities.UserStats.filter({ user_id: user.id });
-    const today = new Date().toISOString().split('T')[0];
-    
-    if (existingStats.length > 0) {
-      const stats = existingStats[0];
-      const lastDate = stats.last_study_date;
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    try {
+      const existingStats = await base44.entities.UserStats.filter({ user_id: user.id });
+      const today = new Date().toISOString().split('T')[0];
       
-      let newStreak = stats.current_streak || 0;
-      if (lastDate === yesterday) {
-        newStreak += 1;
-      } else if (lastDate !== today) {
-        newStreak = 1;
+      if (existingStats.length > 0) {
+        const stats = existingStats[0];
+        const lastDate = stats.last_study_date;
+        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+        
+        let newStreak = stats.current_streak || 0;
+        if (lastDate === yesterday) {
+          newStreak += 1;
+        } else if (lastDate !== today) {
+          newStreak = 1;
+        }
+
+        const newTotalPoints = (stats.total_points || 0) + pointsEarned;
+        const newLevel = Math.floor(newTotalPoints / 1000) + 1;
+        const newSessions = (stats.total_sessions || 0) + 1;
+
+        await base44.entities.UserStats.update(stats.id, {
+          total_study_minutes: (stats.total_study_minutes || 0) + durationMinutes,
+          verified_focus_minutes: (stats.verified_focus_minutes || 0) + verifiedMinutes,
+          weekly_study_minutes: (stats.weekly_study_minutes || 0) + durationMinutes,
+          weekly_verified_minutes: (stats.weekly_verified_minutes || 0) + verifiedMinutes,
+          current_streak: newStreak,
+          longest_streak: Math.max(newStreak, stats.longest_streak || 0),
+          last_study_date: today,
+          total_points: newTotalPoints,
+          level: newLevel,
+          total_sessions: newSessions
+        });
+
+        // Check for badge achievements
+        await checkBadgeAchievements(user.id, {
+          totalHours: Math.floor(((stats.total_study_minutes || 0) + durationMinutes) / 60),
+          streak: newStreak,
+          sessions: newSessions
+        });
+      } else {
+        await base44.entities.UserStats.create({
+          user_id: user.id,
+          user_email: user.email,
+          user_name: user.full_name,
+          total_study_minutes: durationMinutes,
+          verified_focus_minutes: verifiedMinutes,
+          weekly_study_minutes: durationMinutes,
+          weekly_verified_minutes: verifiedMinutes,
+          current_streak: 1,
+          longest_streak: 1,
+          last_study_date: today,
+          total_points: pointsEarned,
+          level: 1,
+          total_sessions: 1
+        });
+
+        await checkBadgeAchievements(user.id, { totalHours: 0, streak: 1, sessions: 1 });
       }
-
-      const newTotalPoints = (stats.total_points || 0) + pointsEarned;
-      const newLevel = Math.floor(newTotalPoints / 1000) + 1;
-      const newSessions = (stats.total_sessions || 0) + 1;
-
-      await base44.entities.UserStats.update(stats.id, {
-        total_study_minutes: (stats.total_study_minutes || 0) + durationMinutes,
-        verified_focus_minutes: (stats.verified_focus_minutes || 0) + verifiedMinutes,
-        weekly_study_minutes: (stats.weekly_study_minutes || 0) + durationMinutes,
-        weekly_verified_minutes: (stats.weekly_verified_minutes || 0) + verifiedMinutes,
-        current_streak: newStreak,
-        longest_streak: Math.max(newStreak, stats.longest_streak || 0),
-        last_study_date: today,
-        total_points: newTotalPoints,
-        level: newLevel,
-        total_sessions: newSessions
-      });
-
-      // Check for badge achievements
-      await checkBadgeAchievements(user.id, {
-        totalHours: Math.floor((stats.total_study_minutes + durationMinutes) / 60),
-        streak: newStreak,
-        sessions: newSessions
-      });
-    } else {
-      await base44.entities.UserStats.create({
-        user_id: user.id,
-        user_email: user.email,
-        user_name: user.full_name,
-        total_study_minutes: durationMinutes,
-        verified_focus_minutes: verifiedMinutes,
-        weekly_study_minutes: durationMinutes,
-        weekly_verified_minutes: verifiedMinutes,
-        current_streak: 1,
-        longest_streak: 1,
-        last_study_date: today,
-        total_points: pointsEarned,
-        level: 1,
-        total_sessions: 1
-      });
-
-      // First session badge
-      await checkBadgeAchievements(user.id, { totalHours: 0, streak: 1, sessions: 1 });
+    } catch (statsErr) {
+      console.warn('Failed to update stats:', statsErr);
     }
 
     setIsSessionActive(false);
+    setIsPaused(false);
     setCurrentSession(null);
+    currentSessionRef.current = null;
     setTabSwitches(0);
     setInactivePeriods(0);
     setBreaksTaken(0);
     setTotalBreakMinutes(0);
     setVerificationPhotos([]);
     setPhotoVerifyEnabled(false);
-    await updateMemberStatus('offline', { session_started_at: null, camera_frame_url: null });
+    await updateMemberStatus('offline', { session_started_at: null, camera_frame_url: null, elapsed_seconds: 0 });
     queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
     queryClient.invalidateQueries({ queryKey: ['roomSessions', roomId] });
+    queryClient.invalidateQueries({ queryKey: ['userStats', user?.id] });
+    queryClient.invalidateQueries({ queryKey: ['myRooms'] });
+
+    toast.success(`🎉 Session completed! +${pointsEarned} points earned (${durationMinutes}m focus)`, { duration: 5000 });
   };
 
   const checkBadgeAchievements = async (userId, stats) => {
@@ -655,6 +737,8 @@ export default function StudyRoom() {
                 preset={timerPreset}
                 customMinutes={customMinutes}
                 onSessionStart={handleSessionStart}
+                onSessionPause={handleSessionPause}
+                onSessionResume={handleSessionResume}
                 onSessionEnd={handleSessionEnd}
                 onBreakStart={handleBreakStart}
                 onBreakEnd={handleBreakEnd}
