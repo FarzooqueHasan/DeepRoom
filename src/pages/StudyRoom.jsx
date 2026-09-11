@@ -69,12 +69,13 @@ export default function StudyRoom() {
     queryKey: ['memberStatuses', roomId],
     queryFn: async () => {
       const statuses = await base44.entities.RoomMemberStatus.filter({ room_id: roomId });
-      // Deduplicate by user_id - keep most recent
+      // Deduplicate by user_email (preferred) or user_id - keep most recent
       const uniqueMap = new Map();
       statuses.forEach(status => {
-        const existing = uniqueMap.get(status.user_id);
-        if (!existing || new Date(status.updated_date) > new Date(existing.updated_date)) {
-          uniqueMap.set(status.user_id, status);
+        const key = (status.user_email && status.user_email.toLowerCase()) || status.user_id;
+        const existing = uniqueMap.get(key);
+        if (!existing || new Date(status.updated_date || 0) > new Date(existing.updated_date || 0)) {
+          uniqueMap.set(key, status);
         }
       });
       return Array.from(uniqueMap.values());
@@ -88,9 +89,14 @@ export default function StudyRoom() {
     const ensureMemberStatus = async () => {
       if (!user || !roomId) return;
       
-      const existing = await base44.entities.RoomMemberStatus.filter({
-        user_id: user.id,
-        room_id: roomId
+      const allStatuses = await base44.entities.RoomMemberStatus.filter({ room_id: roomId });
+      const userEmailLower = user.email?.toLowerCase();
+      
+      // Find any existing status matching user.id or user.email
+      const existing = allStatuses.filter(s => {
+        const matchesId = s.user_id && s.user_id === user.id;
+        const matchesEmail = userEmailLower && s.user_email && s.user_email.toLowerCase() === userEmailLower;
+        return matchesId || matchesEmail;
       });
       
       if (existing.length === 0) {
@@ -102,11 +108,20 @@ export default function StudyRoom() {
           status: 'offline',
           last_active: new Date().toISOString()
         });
-      } else if (existing.length > 1) {
-        // Keep the most recent one, delete duplicates
-        const sorted = existing.sort((a, b) => new Date(b.updated_date) - new Date(a.updated_date));
+      } else {
+        // Keep the most recent, ensure it has current user.id and user.email
+        const sorted = existing.sort((a, b) => new Date(b.updated_date || 0) - new Date(a.updated_date || 0));
+        const currentActive = sorted[0];
+        if (currentActive.user_id !== user.id || currentActive.user_email !== user.email) {
+          await base44.entities.RoomMemberStatus.update(currentActive.id, {
+            user_id: user.id,
+            user_email: user.email,
+            user_name: user.full_name,
+          });
+        }
+        // Delete any older duplicate/legacy statuses for this person
         for (let i = 1; i < sorted.length; i++) {
-          await base44.entities.RoomMemberStatus.delete(sorted[i].id);
+          await base44.entities.RoomMemberStatus.delete(sorted[i].id).catch(() => {});
         }
       }
       queryClient.invalidateQueries({ queryKey: ['memberStatuses', roomId] });
@@ -115,17 +130,39 @@ export default function StudyRoom() {
     ensureMemberStatus();
   }, [user, roomId, queryClient]);
 
-  // Ensure room.members includes user.id and user.email for home page cross-browser discovery
+  // Ensure room.members contains only unique UIDs and member_emails contains unique emails
   useEffect(() => {
     if (!room || !user) return;
     const members = room.members || [];
-    const hasId = members.includes(user.id);
-    const hasEmail = user.email && members.includes(user.email);
-    if (!hasId || (user.email && !hasEmail)) {
-      const updated = Array.from(new Set([...members, user.id, user.email].filter(Boolean)));
-      base44.entities.Room.update(room.id, { members: updated }).catch(() => {});
+    const memberEmails = room.member_emails || [];
+    const userEmailLower = user.email?.toLowerCase();
+    
+    // Filter out raw email addresses and legacy local_ IDs from members array
+    const cleanedMembers = members.filter(m => {
+      if (typeof m !== 'string') return false;
+      if (m === user.id) return true;
+      if (userEmailLower && (m === user.email || m.toLowerCase() === userEmailLower)) return false;
+      if (m.startsWith('local_')) return false;
+      if (m.includes('@')) return false;
+      return true;
+    });
+    if (!cleanedMembers.includes(user.id)) {
+      cleanedMembers.push(user.id);
     }
-  }, [room?.id, room?.members, user?.id, user?.email]);
+    
+    const cleanedEmails = Array.from(new Set([...memberEmails, userEmailLower].filter(Boolean)));
+    
+    const needsMemberUpdate = cleanedMembers.length !== members.length || !members.includes(user.id);
+    const needsEmailUpdate = cleanedEmails.length !== memberEmails.length;
+    
+    if (needsMemberUpdate || needsEmailUpdate) {
+      base44.entities.Room.update(room.id, { 
+        members: cleanedMembers,
+        member_emails: cleanedEmails,
+        host_id: (room.host_email && userEmailLower && room.host_email.toLowerCase() === userEmailLower) ? user.id : room.host_id
+      }).catch(() => {});
+    }
+  }, [room?.id, room?.members, room?.member_emails, user?.id, user?.email]);
 
   const { data: allStats = [] } = useQuery({
     queryKey: ['leaderboard'],

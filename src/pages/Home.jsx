@@ -77,10 +77,11 @@ export default function Home() {
             return true;
           }
           
-          // Check in members array (could be IDs or emails)
+          // Check in members or member_emails array
           const membersList = room.members || [];
+          const memberEmails = room.member_emails || [];
           if (membersList.includes(userIdentifier)) return true;
-          if (userEmail && membersList.some(m => typeof m === 'string' && m.toLowerCase() === userEmail)) return true;
+          if (userEmail && (memberEmails.includes(userEmail) || membersList.some(m => typeof m === 'string' && m.toLowerCase() === userEmail))) return true;
 
           return false;
         });
@@ -129,7 +130,8 @@ export default function Home() {
         invite_code: generateInviteCode(),
         host_id: user.id,
         host_email: user.email,
-        members: [user.id, user.email].filter(Boolean),
+        members: [user.id],
+        member_emails: user.email ? [user.email.toLowerCase()] : [],
         is_shared_session: false,
         active_timer_type: 'none'
       });
@@ -175,9 +177,14 @@ export default function Home() {
       const rooms = await base44.entities.Room.filter({ invite_code: joinCode.trim().toUpperCase() });
       if (rooms.length > 0) {
         const room = rooms[0];
-        const updatedMembers = Array.from(new Set([...(room.members || []), user.id, user.email].filter(Boolean)));
+        // Clean out legacy emails and local IDs from members array so members only contains UIDs
+        const cleanExistingMembers = (room.members || []).filter(m => typeof m === 'string' && !m.includes('@') && !m.startsWith('local_'));
+        const updatedMembers = Array.from(new Set([...cleanExistingMembers, user.id]));
+        const updatedMemberEmails = Array.from(new Set([...(room.member_emails || []), user.email?.toLowerCase()].filter(Boolean)));
+
         await base44.entities.Room.update(room.id, {
-          members: updatedMembers
+          members: updatedMembers,
+          member_emails: updatedMemberEmails
         });
         
         // Create member status for new member
@@ -215,6 +222,27 @@ export default function Home() {
     const mins = minutes % 60;
     if (hours === 0) return `${mins}m`;
     return `${hours}h ${mins}m`;
+  };
+
+  const getRoomMemberCount = (room) => {
+    const rawMembers = room.members || [];
+    // Deduplicate: collapse legacy email strings and local IDs that refer to the same person
+    const uniqueIdentifiers = new Set();
+    rawMembers.forEach((m) => {
+      if (!m || typeof m !== 'string') return;
+      if (m.includes('@')) {
+        uniqueIdentifiers.add(m.toLowerCase());
+      } else if (m.startsWith('local_')) {
+        uniqueIdentifiers.add(m.replace(/^local_/, '').replace(/_/g, '.').toLowerCase());
+      } else {
+        if (room.host_id && room.host_id === m && room.host_email) {
+          uniqueIdentifiers.add(room.host_email.toLowerCase());
+        } else {
+          uniqueIdentifiers.add(m);
+        }
+      }
+    });
+    return Math.max(1, uniqueIdentifiers.size);
   };
 
   return (
@@ -363,7 +391,7 @@ export default function Home() {
                       <div className="flex items-center gap-3 mt-1 text-sm text-zinc-500">
                         <span className="flex items-center gap-1">
                           <Users className="w-3 h-3" />
-                          {(room.members || []).length} members
+                          {getRoomMemberCount(room)} {getRoomMemberCount(room) === 1 ? 'member' : 'members'}
                         </span>
                         <span className="text-zinc-700">•</span>
                         <span className="font-mono text-xs">{room.invite_code}</span>

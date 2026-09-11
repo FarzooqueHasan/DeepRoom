@@ -321,7 +321,8 @@ export const syncLocalToFirestore = async (user) => {
               ...r,
               host_id: user.id,
               host_email: user.email || r.host_email,
-              members: Array.from(new Set([...(r.members || []), user.id, user.email].filter(Boolean))),
+              members: [user.id],
+              member_emails: user.email ? [user.email.toLowerCase()] : [],
             });
             console.info(`[DeepRoom Sync] Synced local room "${r.name}" to Firestore.`);
           }
