@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'react-hot-toast';
+import { syncLocalToFirestore } from '@/firebase/firestore';
 
 export default function Home() {
   const { user, openAuthModal, isAuthenticated } = useAuth();
@@ -22,12 +23,18 @@ export default function Home() {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
 
-  // Subscribe to real-time room updates across browsers
+  // Subscribe to real-time room updates and member status updates across browsers
   useEffect(() => {
-    const unsubscribe = base44.entities.Room.subscribe(() => {
+    const unsubRoom = base44.entities.Room.subscribe(() => {
       queryClient.invalidateQueries({ queryKey: ['myRooms'] });
     });
-    return () => unsubscribe();
+    const unsubMember = base44.entities.RoomMemberStatus.subscribe(() => {
+      queryClient.invalidateQueries({ queryKey: ['myRooms'] });
+    });
+    return () => {
+      unsubRoom();
+      unsubMember();
+    };
   }, [queryClient]);
 
   const { data: myRooms = [], refetch: refetchRooms } = useQuery({
@@ -35,14 +42,40 @@ export default function Home() {
     queryFn: async () => {
       if (!user) return [];
       try {
-        const allRooms = await base44.entities.Room.list();
+        // Sync any local orphaned rooms from this browser to cloud
+        await syncLocalToFirestore(user);
+
+        const [allRooms, allStatuses] = await Promise.all([
+          base44.entities.Room.list(),
+          base44.entities.RoomMemberStatus.list().catch(() => []),
+        ]);
+
         const userIdentifier = user.id;
         const userEmail = user.email?.toLowerCase();
         
+        // Find all room IDs where user is an active/past member
+        const memberRoomIds = new Set();
+        (allStatuses || []).forEach(s => {
+          const matchesId = s.user_id && s.user_id === userIdentifier;
+          const matchesEmail = userEmail && s.user_email && s.user_email.toLowerCase() === userEmail;
+          if ((matchesId || matchesEmail) && s.room_id) {
+            memberRoomIds.add(s.room_id);
+          }
+        });
+
         return allRooms.filter(room => {
+          // Check if user has a member status record for this room
+          if (memberRoomIds.has(room.id)) return true;
+
           // Check by host ID or host Email
           if (room.host_id && room.host_id === userIdentifier) return true;
-          if (userEmail && room.host_email && room.host_email.toLowerCase() === userEmail) return true;
+          if (userEmail && room.host_email && room.host_email.toLowerCase() === userEmail) {
+            // Auto-adopt host_id if this room was created before signing in with permanent UID
+            if (room.host_id !== userIdentifier) {
+              base44.entities.Room.update(room.id, { host_id: userIdentifier }).catch(() => {});
+            }
+            return true;
+          }
           
           // Check in members array (could be IDs or emails)
           const membersList = room.members || [];

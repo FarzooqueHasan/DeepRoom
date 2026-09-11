@@ -115,6 +115,18 @@ export default function StudyRoom() {
     ensureMemberStatus();
   }, [user, roomId, queryClient]);
 
+  // Ensure room.members includes user.id and user.email for home page cross-browser discovery
+  useEffect(() => {
+    if (!room || !user) return;
+    const members = room.members || [];
+    const hasId = members.includes(user.id);
+    const hasEmail = user.email && members.includes(user.email);
+    if (!hasId || (user.email && !hasEmail)) {
+      const updated = Array.from(new Set([...members, user.id, user.email].filter(Boolean)));
+      base44.entities.Room.update(room.id, { members: updated }).catch(() => {});
+    }
+  }, [room?.id, room?.members, user?.id, user?.email]);
+
   const { data: allStats = [] } = useQuery({
     queryKey: ['leaderboard'],
     queryFn: () => base44.entities.UserStats.list(),

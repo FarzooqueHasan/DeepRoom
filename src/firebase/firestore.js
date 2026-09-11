@@ -294,3 +294,42 @@ export const getEntityStore = (collectionName) => {
   }
   return localStores.get(collectionName);
 };
+
+// Automatic local-to-cloud sync for orphaned rooms created while offline or before login
+export const syncLocalToFirestore = async (user) => {
+  if (!isFirebaseConfigured || !db || !user?.id) return;
+  try {
+    const rawLocalRooms = localStorage.getItem('deeproom_db_Room');
+    if (rawLocalRooms) {
+      const localRooms = JSON.parse(rawLocalRooms);
+      if (Array.isArray(localRooms) && localRooms.length > 0) {
+        const roomStore = getEntityStore('Room');
+        for (const r of localRooms) {
+          if (!r.name) continue;
+          // Check if already exists in Firestore by ID or invite code
+          let exists = false;
+          if (r.id) {
+            const found = await roomStore.get(r.id);
+            if (found) exists = true;
+          }
+          if (!exists && r.invite_code) {
+            const byCode = await roomStore.filter({ invite_code: r.invite_code });
+            if (byCode.length > 0) exists = true;
+          }
+          if (!exists) {
+            await roomStore.create({
+              ...r,
+              host_id: user.id,
+              host_email: user.email || r.host_email,
+              members: Array.from(new Set([...(r.members || []), user.id, user.email].filter(Boolean))),
+            });
+            console.info(`[DeepRoom Sync] Synced local room "${r.name}" to Firestore.`);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[DeepRoom Sync] Warning syncing local rooms to Firestore:', err);
+  }
+};
+
