@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Calendar, BookOpen, Shield, FileText, ChevronDown, ChevronUp, CheckCircle, TrendingUp, Coffee } from 'lucide-react';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
+import { formatSessionDuration } from '@/lib/studySessions';
 
 export default function SessionHistory({ sessions = [] }) {
   const [expandedSession, setExpandedSession] = useState(null);
@@ -12,31 +13,32 @@ export default function SessionHistory({ sessions = [] }) {
     .sort((a, b) => new Date(b.end_time) - new Date(a.end_time))
     .slice(0, 10);
 
-  const formatDuration = (minutes) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours === 0) return `${mins}m`;
-    return `${hours}h ${mins}m`;
-  };
-
   const getFocusColor = (score) => {
     if (score >= 85) return 'text-emerald-500';
     if (score >= 60) return 'text-yellow-500';
     return 'text-red-500';
   };
 
-  // Aggregate top subjects
+  // Aggregate top subjects by exact seconds
   const subjectMap = {};
   completedSessions.forEach(s => {
     const subj = s.subject || 'General Study';
-    subjectMap[subj] = (subjectMap[subj] || 0) + (s.duration_minutes || 0);
+    const durSecs = s.duration_seconds !== undefined && s.duration_seconds !== null
+      ? Number(s.duration_seconds)
+      : Math.round(Number(s.duration_minutes || 0) * 60);
+    subjectMap[subj] = (subjectMap[subj] || 0) + durSecs;
   });
   const topSubjects = Object.entries(subjectMap)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
 
-  const totalStudyMinutes = completedSessions.reduce((sum, s) => sum + (s.duration_minutes || 0), 0);
-  const totalBreakMinutes = completedSessions.reduce((sum, s) => sum + (s.break_duration_minutes || 0), 0);
+  const totalStudySeconds = completedSessions.reduce((sum, s) => {
+    const dur = s.duration_seconds !== undefined && s.duration_seconds !== null
+      ? Number(s.duration_seconds)
+      : Math.round(Number(s.duration_minutes || 0) * 60);
+    return sum + dur;
+  }, 0);
+  const totalBreakSeconds = completedSessions.reduce((sum, s) => sum + Math.round(Number(s.break_duration_minutes || 0) * 60), 0);
 
   return (
     <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
@@ -53,14 +55,14 @@ export default function SessionHistory({ sessions = [] }) {
               <Clock className="w-3 h-3" />
               Total Study
             </div>
-            <p className="text-sm text-zinc-100 font-medium">{formatDuration(totalStudyMinutes)}</p>
+            <p className="text-sm text-zinc-100 font-medium">{formatSessionDuration(totalStudySeconds)}</p>
           </div>
           <div className="bg-zinc-800/30 rounded-lg p-2">
             <div className="flex items-center gap-1 text-xs text-zinc-500 mb-1">
               <Coffee className="w-3 h-3" />
               Total Breaks
             </div>
-            <p className="text-sm text-zinc-100 font-medium">{formatDuration(totalBreakMinutes)}</p>
+            <p className="text-sm text-zinc-100 font-medium">{formatSessionDuration(totalBreakSeconds)}</p>
           </div>
         </div>
       )}
@@ -73,13 +75,13 @@ export default function SessionHistory({ sessions = [] }) {
             Top Subjects
           </div>
           <div className="space-y-1">
-            {topSubjects.map(([subject, minutes], i) => (
+            {topSubjects.map(([subject, secs], i) => (
               <div key={subject} className="flex items-center justify-between text-xs">
                 <span className="text-zinc-300 flex items-center gap-1">
                   <span className="text-zinc-600">{i + 1}.</span>
                   {subject}
                 </span>
-                <span className="text-zinc-500">{formatDuration(minutes)}</span>
+                <span className="text-zinc-500">{formatSessionDuration(secs)}</span>
               </div>
             ))}
           </div>
@@ -89,6 +91,10 @@ export default function SessionHistory({ sessions = [] }) {
       <div className="space-y-2 max-h-96 overflow-y-auto">
         {sortedSessions.map((session, index) => {
           const isExpanded = expandedSession === session.id;
+          const sessionSecs =
+            session.duration_seconds !== undefined && session.duration_seconds !== null
+              ? Number(session.duration_seconds)
+              : Math.round(Number(session.duration_minutes || 0) * 60);
           
           return (
             <motion.div
@@ -117,7 +123,7 @@ export default function SessionHistory({ sessions = [] }) {
                     <div className="flex items-center gap-3 text-xs text-zinc-500">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        {formatDuration(session.duration_minutes)}
+                        {formatSessionDuration(sessionSecs)}
                       </span>
                       
                       {session.camera_enabled && session.focus_score && (
@@ -189,7 +195,7 @@ export default function SessionHistory({ sessions = [] }) {
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         {session.break_duration_minutes > 0 && (
                           <div className="text-zinc-500">
-                            Break Time: {formatDuration(session.break_duration_minutes)}
+                            Break Time: {formatSessionDuration(Math.round((session.break_duration_minutes || 0) * 60))}
                           </div>
                         )}
                         {session.tab_switches > 0 && (

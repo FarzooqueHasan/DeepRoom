@@ -16,6 +16,7 @@ import {
   AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger 
 } from '@/components/ui/alert-dialog';
 import { format } from 'date-fns';
+import { formatSessionDuration } from '@/lib/studySessions';
 
 export default function Profile() {
   const { user, logout, openAuthModal, isAuthenticated } = useAuth();
@@ -44,12 +45,12 @@ export default function Profile() {
     enabled: !!user?.id,
   });
 
-  const formatTime = (minutes) => {
-    if (!minutes) return '0h';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours === 0) return `${mins}m`;
-    return `${hours}h ${mins}m`;
+  const formatTime = (minutes, seconds) => {
+    const totalSecs =
+      seconds !== undefined && seconds !== null
+        ? Number(seconds)
+        : Math.round((Number(minutes) || 0) * 60);
+    return formatSessionDuration(totalSecs);
   };
 
   const deleteSession = async (sessionId) => {
@@ -209,12 +210,16 @@ export default function Profile() {
               >
                 <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 text-center">
                   <Clock className="w-5 h-5 text-zinc-500 mx-auto mb-2" />
-                  <p className="text-2xl font-light">{formatTime(userStats.total_study_minutes)}</p>
+                  <p className="text-2xl font-light">
+                    {formatTime(userStats.total_study_minutes, userStats.total_study_seconds)}
+                  </p>
                   <p className="text-xs text-zinc-500 uppercase tracking-wider">Total Study</p>
                 </div>
                 <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 text-center">
                   <Shield className="w-5 h-5 text-emerald-500 mx-auto mb-2" />
-                  <p className="text-2xl font-light text-emerald-500">{formatTime(userStats.verified_focus_minutes)}</p>
+                  <p className="text-2xl font-light text-emerald-500">
+                    {formatTime(userStats.verified_focus_minutes, userStats.verified_focus_seconds)}
+                  </p>
                   <p className="text-xs text-zinc-500 uppercase tracking-wider">Verified</p>
                 </div>
                 <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 text-center">
@@ -298,7 +303,13 @@ export default function Profile() {
                             {session.created_date && format(new Date(session.created_date), 'MMM d, h:mm a')}
                           </span>
                           <span>•</span>
-                          <span>{session.duration_minutes || 0} mins</span>
+                          <span>
+                            {formatSessionDuration(
+                              session.duration_seconds !== undefined && session.duration_seconds !== null
+                                ? session.duration_seconds
+                                : Math.round((session.duration_minutes || 0) * 60)
+                            )}
+                          </span>
                           <span>•</span>
                           <span className={getFocusColor(session.focus_score || 100)}>
                             {session.focus_score || 100}% focus

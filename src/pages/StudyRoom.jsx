@@ -4,8 +4,8 @@ import { createPageUrl } from '@/utils';
 import { base44 } from '@/api/base44Client';
 import { useAuth } from '@/lib/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Copy, Check, Settings2, Users } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, Copy, Check, Settings2, Users, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -13,7 +13,7 @@ import Timer from '@/components/study/Timer';
 import FocusTracker from '@/components/study/FocusTracker';
 import MemberList from '@/components/study/MemberList';
 import LeaderboardCard from '@/components/study/LeaderboardCard';
-import TimerSettings from '@/components/study/TimerSettings';
+import RoomComparison from '@/components/study/RoomComparison';
 import SubjectInput from '@/components/study/SubjectInput';
 import AntiCheatMonitor from '@/components/study/AntiCheatMonitor';
 import SessionHistory from '@/components/study/SessionHistory';
@@ -21,17 +21,17 @@ import RoomSettings from '@/components/study/RoomSettings';
 import RoomChat from '@/components/study/RoomChat';
 import MusicPlayer from '@/components/study/MusicPlayer';
 import SpotifyEmbed from '@/components/study/SpotifyEmbed';
-import SyncTimerControl from '@/components/study/SyncTimerControl';
 import { useRoomNotifications } from '@/components/study/NotificationToast';
-import { Toaster } from 'react-hot-toast';
+import { Toaster, toast } from 'react-hot-toast';
 import SharedWhiteboard from '@/components/collaboration/SharedWhiteboard';
 import SharedDocEditor from '@/components/collaboration/SharedDocEditor';
 import TaskManager from '@/components/collaboration/TaskManager';
 import StudyBuddy from '@/components/collaboration/StudyBuddy';
+import { logCompletedSession, formatSessionDuration, playRoomAlarm } from '@/lib/studySessions';
 
 export default function StudyRoom() {
   const urlParams = new URLSearchParams(window.location.search);
-  const roomId = urlParams.get('id');
+  const roomId = urlParams.get('id') || urlParams.get('roomId');
 
   const { user } = useAuth();
   const [timerPreset, setTimerPreset] = useState('pomodoro');
@@ -54,7 +54,24 @@ export default function StudyRoom() {
   const verificationPhotosRef = useRef(verificationPhotos);
   verificationPhotosRef.current = verificationPhotos;
 
+  const [isRinging, setIsRinging] = useState(false);
+  const [ringBanner, setRingBanner] = useState(null);
+  const lastRingHandledRef = useRef(null);
+  const [liveTimerElapsedSeconds, setLiveTimerElapsedSeconds] = useState(0);
+
   const queryClient = useQueryClient();
+
+  const { data: allSessions = [] } = useQuery({
+    queryKey: ['allSessions'],
+    queryFn: async () => {
+      try {
+        return await base44.entities.StudySession.list();
+      } catch (err) {
+        return [];
+      }
+    },
+    refetchInterval: 4000,
+  });
 
   const { data: room, isLoading: isLoadingRoom } = useQuery({
     queryKey: ['room', roomId],
@@ -283,6 +300,73 @@ export default function StudyRoom() {
     };
   }, [user, roomId]);
 
+  // Listen for room ring alarm
+  useEffect(() => {
+    if (!room?.last_ring_at) return;
+    const ringTime = new Date(room.last_ring_at).getTime();
+    if (isNaN(ringTime)) return;
+
+    // React if ring occurred within last 12 seconds
+    const isRecent = Date.now() - ringTime < 12000;
+    if (isRecent && lastRingHandledRef.current !== room.last_ring_at) {
+      lastRingHandledRef.current = room.last_ring_at;
+      playRoomAlarm();
+      setIsRinging(true);
+      setRingBanner({
+        by: room.last_ring_by || 'A member',
+        time: new Date(room.last_ring_at),
+      });
+
+      const timer = setTimeout(() => {
+        setIsRinging(false);
+        setRingBanner(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [room?.last_ring_at, room?.last_ring_by]);
+
+  const handleRingRoom = async () => {
+    if (!room?.id) return;
+    const senderName = user?.full_name || user?.email?.split('@')[0] || 'A member';
+    playRoomAlarm();
+    setIsRinging(true);
+    setRingBanner({ by: 'You', time: new Date() });
+
+    setTimeout(() => {
+      setIsRinging(false);
+      setRingBanner(null);
+    }, 5000);
+
+    try {
+      await base44.entities.Room.update(room.id, {
+        last_ring_at: new Date().toISOString(),
+        last_ring_by: senderName,
+      });
+
+      // Post alarm notification to chat
+      await base44.entities.RoomMessage.create({
+        room_id: room.id,
+        user_id: user?.id || 'anonymous',
+        user_name: senderName,
+        user_email: user?.email || '',
+        content: `🔔 Rang the room alarm! Time to lock in and focus!`,
+        created_date: new Date().toISOString(),
+      }).catch(() => {});
+
+      toast(`🔔 Rang the room alarm!`, {
+        icon: '🔔',
+        style: {
+          background: '#7c2d12',
+          color: '#fed7aa',
+          border: '1px solid #ea580c',
+        },
+        duration: 3500,
+      });
+    } catch (err) {
+      console.warn('Failed to ring room:', err);
+    }
+  };
+
   const handleSessionStart = async (startTime) => {
     if (!user || !roomId) return;
     
@@ -325,9 +409,9 @@ export default function StudyRoom() {
   }, [user, roomId, focusScore, updateMemberStatus]);
 
   const handleSessionEnd = async (startTime, endTime, actualSeconds = null) => {
-    if (!user || !roomId) return;
+    if (!user) return;
     
-    // Calculate duration accurately
+    // Calculate duration accurately to the second
     let durationSeconds = actualSeconds;
     if (typeof durationSeconds !== 'number' || durationSeconds <= 0) {
       if (startTime && endTime) {
@@ -336,148 +420,25 @@ export default function StudyRoom() {
         durationSeconds = 60;
       }
     }
-    // Any session of at least 30 seconds counts as at least 1 minute
-    const durationMinutes = Math.max(1, Math.round(durationSeconds / 60));
-    const verifiedMinutes = cameraEnabled && focusScore >= 60 ? durationMinutes : 0;
-    
-    // Calculate points: 10 per study minute, 5 per verified minute, 100 bonus per session
-    const pointsEarned = durationMinutes * 10 + verifiedMinutes * 5 + 100;
-    
-    // Find or recover active session
-    let sessionToUpdate = currentSessionRef.current || currentSession;
-    if (!sessionToUpdate) {
-      try {
-        const activeSessions = await base44.entities.StudySession.filter({
-          user_id: user.id,
-          room_id: roomId,
-          status: 'active'
-        });
-        if (activeSessions.length > 0) {
-          sessionToUpdate = activeSessions.sort((a, b) => new Date(b.start_time || 0) - new Date(a.start_time || 0))[0];
-        }
-      } catch (e) {
-        console.warn('Fallback active session query:', e);
-      }
-    }
+    const durationMinutes = Number((durationSeconds / 60).toFixed(2));
+    const verifiedSeconds = cameraEnabled && focusScore >= 60 ? durationSeconds : 0;
+    const pointsEarned = Math.max(50, Math.round(durationSeconds * (10 / 60) + (verifiedSeconds * (5 / 60)) + 50));
 
-    const startIso = startTime ? new Date(startTime).toISOString() : (sessionToUpdate?.start_time || new Date(Date.now() - durationSeconds * 1000).toISOString());
-    const endIso = endTime ? new Date(endTime).toISOString() : new Date().toISOString();
-
-    if (!sessionToUpdate) {
-      try {
-        sessionToUpdate = await base44.entities.StudySession.create({
-          user_id: user.id,
-          user_email: user.email,
-          user_name: user.full_name,
-          room_id: roomId,
-          subject: subject || 'General Focus',
-          start_time: startIso,
-          camera_enabled: cameraEnabled,
-          status: 'active'
-        });
-      } catch (e) {
-        console.error('Failed to create fallback session:', e);
-      }
-    }
-
-    // Generate AI summary
-    let aiSummary = '';
-    try {
-      const prompt = `Create a brief, motivational summary for this study session. Capture the total study duration, break times, and subjects studied.
-      - Subject: ${subject || 'General Study'}
-      - Total Study Duration: ${durationMinutes} minutes (${durationSeconds}s)
-      - Break Time: ${totalBreakMinutes} minutes across ${breaksTaken} break(s)
-      - Focus Score: ${focusScore}%
-      - Camera Tracking: ${cameraEnabled ? 'Yes' : 'No'}
-      - Tab Switches: ${tabSwitches}
-      - Inactive Periods: ${inactivePeriods}
-      
-      Keep it to 2-3 sentences. Mention the total study duration, how much break time was taken, and what subject was studied. Highlight achievements and provide encouragement.`;
-      
-      aiSummary = await base44.integrations.Core.InvokeLLM({ prompt });
-    } catch (error) {
-      aiSummary = `Studied ${subject || 'general topics'} for ${durationMinutes} minute${durationMinutes > 1 ? 's' : ''}${totalBreakMinutes > 0 ? ` with ${totalBreakMinutes}m of breaks` : ''}${cameraEnabled ? ` at ${focusScore}% focus` : ''}. Keep up the great work!`;
-    }
-    
-    if (sessionToUpdate?.id) {
-      await base44.entities.StudySession.update(sessionToUpdate.id, {
-        end_time: endIso,
-        duration_minutes: durationMinutes,
-        duration_seconds: durationSeconds,
-        focus_score: focusScore,
-        tab_switches: tabSwitches,
-        inactive_periods: inactivePeriods,
-        status: 'completed',
-        breaks_taken: breaksTaken,
-        break_duration_minutes: totalBreakMinutes,
-        ai_summary: aiSummary,
-        points_earned: pointsEarned,
-        verification_photos: verificationPhotosRef.current
-      });
-    }
-
-    // Update user stats with gamification
-    try {
-      const existingStats = await base44.entities.UserStats.filter({ user_id: user.id });
-      const today = new Date().toISOString().split('T')[0];
-      
-      if (existingStats.length > 0) {
-        const stats = existingStats[0];
-        const lastDate = stats.last_study_date;
-        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-        
-        let newStreak = stats.current_streak || 0;
-        if (lastDate === yesterday) {
-          newStreak += 1;
-        } else if (lastDate !== today) {
-          newStreak = 1;
-        }
-
-        const newTotalPoints = (stats.total_points || 0) + pointsEarned;
-        const newLevel = Math.floor(newTotalPoints / 1000) + 1;
-        const newSessions = (stats.total_sessions || 0) + 1;
-
-        await base44.entities.UserStats.update(stats.id, {
-          total_study_minutes: (stats.total_study_minutes || 0) + durationMinutes,
-          verified_focus_minutes: (stats.verified_focus_minutes || 0) + verifiedMinutes,
-          weekly_study_minutes: (stats.weekly_study_minutes || 0) + durationMinutes,
-          weekly_verified_minutes: (stats.weekly_verified_minutes || 0) + verifiedMinutes,
-          current_streak: newStreak,
-          longest_streak: Math.max(newStreak, stats.longest_streak || 0),
-          last_study_date: today,
-          total_points: newTotalPoints,
-          level: newLevel,
-          total_sessions: newSessions
-        });
-
-        // Check for badge achievements
-        await checkBadgeAchievements(user.id, {
-          totalHours: Math.floor(((stats.total_study_minutes || 0) + durationMinutes) / 60),
-          streak: newStreak,
-          sessions: newSessions
-        });
-      } else {
-        await base44.entities.UserStats.create({
-          user_id: user.id,
-          user_email: user.email,
-          user_name: user.full_name,
-          total_study_minutes: durationMinutes,
-          verified_focus_minutes: verifiedMinutes,
-          weekly_study_minutes: durationMinutes,
-          weekly_verified_minutes: verifiedMinutes,
-          current_streak: 1,
-          longest_streak: 1,
-          last_study_date: today,
-          total_points: pointsEarned,
-          level: 1,
-          total_sessions: 1
-        });
-
-        await checkBadgeAchievements(user.id, { totalHours: 0, streak: 1, sessions: 1 });
-      }
-    } catch (statsErr) {
-      console.warn('Failed to update stats:', statsErr);
-    }
+    // Immediately log session atomically using centralized studySession logger
+    await logCompletedSession({
+      user,
+      roomId: roomId || 'personal',
+      subject: subject || 'General Focus',
+      note: subject || 'Room study session',
+      startTime,
+      endTime,
+      durationSeconds,
+      cameraEnabled,
+      focusScore,
+      breaksTaken,
+      breakDurationMinutes: totalBreakMinutes,
+      queryClient,
+    });
 
     setIsSessionActive(false);
     setIsPaused(false);
@@ -495,7 +456,7 @@ export default function StudyRoom() {
     queryClient.invalidateQueries({ queryKey: ['userStats', user?.id] });
     queryClient.invalidateQueries({ queryKey: ['myRooms'] });
 
-    toast.success(`🎉 Session completed! +${pointsEarned} points earned (${durationMinutes}m focus)`, { duration: 5000 });
+    toast.success(`🎉 Session completed! +${pointsEarned} points (${formatSessionDuration(durationSeconds)})`, { duration: 5000 });
   };
 
   const checkBadgeAchievements = async (userId, stats) => {
@@ -701,7 +662,22 @@ export default function StudyRoom() {
             </div>
           </div>
           
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRingRoom}
+              className={`gap-1.5 text-xs h-8 px-3 rounded-lg border transition-all ${
+                isRinging
+                  ? 'bg-amber-500 text-zinc-950 font-bold border-amber-400 shadow-[0_0_20px_rgba(245,158,11,0.6)] animate-bounce'
+                  : 'bg-zinc-900/80 border-amber-500/30 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/50'
+              }`}
+              title="Ring room alarm to get everyone's attention"
+            >
+              <Bell className={`w-3.5 h-3.5 ${isRinging ? 'animate-spin' : ''}`} />
+              <span>{isRinging ? 'Ringing Room!' : 'Ring Room'}</span>
+            </Button>
+
             <div className="text-sm text-zinc-500 flex items-center gap-2">
               <Users className="w-4 h-4" />
               {memberStatuses.filter(m => m.status !== 'offline').length} active
@@ -717,6 +693,21 @@ export default function StudyRoom() {
           </div>
         </div>
       </header>
+
+      {/* Ringing Room Alarm Banner */}
+      <AnimatePresence>
+        {ringBanner && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="bg-amber-500/20 border-b border-amber-500/40 text-amber-300 px-4 py-2.5 flex items-center justify-center gap-2 font-medium text-sm z-30 shadow-[0_4px_20px_rgba(245,158,11,0.2)]"
+          >
+            <Bell className="w-4 h-4 text-amber-400 animate-bounce" />
+            <span>🔔 <strong>{ringBanner.by}</strong> rang the room alarm! Time to lock in and focus!</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-3 gap-8">
@@ -736,33 +727,23 @@ export default function StudyRoom() {
               <Timer
                 preset={timerPreset}
                 customMinutes={customMinutes}
+                onPresetChange={setTimerPreset}
                 onSessionStart={handleSessionStart}
                 onSessionPause={handleSessionPause}
                 onSessionResume={handleSessionResume}
                 onSessionEnd={handleSessionEnd}
                 onBreakStart={handleBreakStart}
                 onBreakEnd={handleBreakEnd}
-                isSharedSession={Boolean(room?.is_shared_session)}
-                sharedTimerStart={room?.timer_started_at || null}
-                sharedDuration={room?.timer_duration_minutes || null}
+                onTick={(elapsedSecs) => setLiveTimerElapsedSeconds(elapsedSecs)}
               />
             </motion.div>
 
             <div className="grid md:grid-cols-2 gap-4">
-              <div className="space-y-4">
-                <TimerSettings
-                  selectedPreset={timerPreset}
-                  onPresetChange={setTimerPreset}
-                  customMinutes={customMinutes}
-                  onCustomChange={setCustomMinutes}
-                />
-                <SyncTimerControl
-                  room={room}
-                  isHost={room?.host_id === user?.id}
-                  timerPreset={timerPreset}
-                  customMinutes={customMinutes}
-                />
-              </div>
+              <RoomComparison
+                members={memberStatuses}
+                allSessions={allSessions}
+                currentUserId={user?.id}
+              />
 
               <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 flex flex-col items-center justify-center">
                 <FocusTracker
@@ -796,6 +777,8 @@ export default function StudyRoom() {
                 <MemberList
                   members={memberStatuses}
                   currentUserId={user?.id}
+                  competitionActive={Boolean(room?.is_shared_session)}
+                  activeUserElapsedSeconds={isSessionActive ? liveTimerElapsedSeconds : null}
                 />
               </TabsContent>
               

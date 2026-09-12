@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Trophy, Clock, Shield, Flame, Medal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { formatSessionDuration } from '@/lib/studySessions';
 
 export default function Leaderboard() {
   const [user, setUser] = useState(null);
@@ -24,12 +25,12 @@ export default function Leaderboard() {
     queryFn: () => base44.entities.UserStats.list(),
   });
 
-  const formatTime = (minutes) => {
-    if (!minutes) return '0h';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours === 0) return `${mins}m`;
-    return `${hours}h ${mins}m`;
+  const formatTime = (minutes, seconds) => {
+    const totalSecs =
+      seconds !== undefined && seconds !== null
+        ? Number(seconds)
+        : Math.round((Number(minutes) || 0) * 60);
+    return formatSessionDuration(totalSecs);
   };
 
   const getMedalColor = (index) => {
@@ -109,7 +110,10 @@ export default function Leaderboard() {
                   <div className="flex items-center gap-4 mt-1 text-sm text-zinc-500">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {formatTime(type === 'weekly' ? stat.weekly_study_minutes : stat.total_study_minutes)}
+                      {formatTime(
+                        type === 'weekly' ? stat.weekly_study_minutes : stat.total_study_minutes,
+                        type === 'weekly' ? stat.weekly_study_seconds : stat.total_study_seconds
+                      )}
                     </span>
                     {stat.current_streak > 0 && (
                       <span className="flex items-center gap-1 text-orange-500">
@@ -121,11 +125,14 @@ export default function Leaderboard() {
                 </div>
 
                 <div className="text-right">
-                  {(stat.verified_focus_minutes > 0 || stat.weekly_verified_minutes > 0) && (
+                  {(stat.verified_focus_minutes > 0 || stat.weekly_verified_minutes > 0 || stat.verified_focus_seconds > 0) && (
                     <div className="flex items-center gap-1 text-emerald-500 justify-end">
                       <Shield className="w-4 h-4" />
                       <span className="font-medium">
-                        {formatTime(type === 'weekly' ? stat.weekly_verified_minutes : stat.verified_focus_minutes)}
+                        {formatTime(
+                          type === 'weekly' ? stat.weekly_verified_minutes : stat.verified_focus_minutes,
+                          type === 'weekly' ? stat.weekly_verified_seconds : stat.verified_focus_seconds
+                        )}
                       </span>
                     </div>
                   )}

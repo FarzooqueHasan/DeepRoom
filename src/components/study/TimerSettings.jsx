@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Zap, Brain, Infinity as InfinityIcon, Settings } from 'lucide-react';
+import { Clock, Zap, Brain, Timer as TimerIcon, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,7 +8,7 @@ const PRESETS = [
   { id: 'pomodoro', label: 'Pomodoro', desc: '25 / 5', icon: Clock, work: 25 },
   { id: '50_10', label: '50/10', desc: '50 / 10', icon: Zap, work: 50 },
   { id: 'deep_work', label: 'Deep Work', desc: '90 / 15', icon: Brain, work: 90 },
-  { id: 'continuous', label: 'Continuous', desc: 'No limit', icon: InfinityIcon, work: null },
+  { id: 'stopwatch', label: 'Stopwatch', desc: 'Start and stop', icon: TimerIcon, work: null },
 ];
 
 export default function TimerSettings({ 
@@ -36,7 +36,7 @@ export default function TimerSettings({
                 onCustomChange(null);
               }}
               className={`flex flex-col items-center gap-1 h-auto py-3 ${
-                selectedPreset === preset.id && !customMinutes
+                (selectedPreset === preset.id || (preset.id === 'stopwatch' && selectedPreset === 'continuous')) && !customMinutes
                   ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-500'
                   : 'bg-zinc-800/50 border border-transparent text-zinc-400 hover:text-zinc-100'
               }`}

@@ -200,9 +200,38 @@ class FirestoreEntityStore {
       clauses.push(limit(limitCount));
     }
 
-    const q = clauses.length > 0 ? query(this._col(), ...clauses) : this._col();
-    const snap = await getDocs(q);
-    return snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    try {
+      const q = clauses.length > 0 ? query(this._col(), ...clauses) : this._col();
+      const snap = await getDocs(q);
+      return snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }));
+    } catch (err) {
+      console.warn(`[Firestore ${this.name}] Query error (${err?.code || err?.message}). Falling back to in-memory filter:`, err);
+      // Resilient fallback: fetch all docs from collection and filter/sort in memory
+      let items = await this.list();
+      if (filterObj && typeof filterObj === 'object') {
+        items = items.filter((item) => {
+          return Object.entries(filterObj).every(([k, v]) => {
+            if (v === undefined || v === null) return true;
+            return item[k] === v;
+          });
+        });
+      }
+      if (orderField) {
+        const isDesc = orderField.startsWith('-');
+        const field = isDesc ? orderField.substring(1) : orderField;
+        items.sort((a, b) => {
+          const valA = a[field] || '';
+          const valB = b[field] || '';
+          if (valA < valB) return isDesc ? 1 : -1;
+          if (valA > valB) return isDesc ? -1 : 1;
+          return 0;
+        });
+      }
+      if (limitCount && limitCount > 0) {
+        items = items.slice(0, limitCount);
+      }
+      return items;
+    }
   }
 
   async get(id) {

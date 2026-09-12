@@ -12,6 +12,7 @@ export default function SyncTimerControl({ room, isHost, timerPreset, customMinu
     pomodoro: 25,
     '50_10': 50,
     deep_work: 90,
+    stopwatch: 480,
     continuous: 480,
   };
 
@@ -50,7 +51,7 @@ export default function SyncTimerControl({ room, isHost, timerPreset, customMinu
       return (
         <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3 text-center">
           <Users className="w-5 h-5 mx-auto mb-1 text-emerald-500" />
-          <p className="text-xs text-emerald-400">Synchronized Timer Active</p>
+          <p className="text-xs text-emerald-400">Room Competition Active</p>
         </div>
       );
     }
@@ -67,7 +68,7 @@ export default function SyncTimerControl({ room, isHost, timerPreset, customMinu
           className="w-full text-xs border-red-400/20 text-red-400 hover:bg-red-400/10"
         >
           <Square className="w-3 h-3 mr-2" />
-          Stop Synchronized Timer
+          Stop Room Competition
         </Button>
       ) : (
         <Button
@@ -77,13 +78,13 @@ export default function SyncTimerControl({ room, isHost, timerPreset, customMinu
           className="w-full text-xs bg-emerald-600 hover:bg-emerald-500"
         >
           <Play className="w-3 h-3 mr-2" />
-          Start Synchronized Timer
+          Start Room Competition
         </Button>
       )}
       <p className="text-xs text-zinc-500 text-center">
-        {room?.is_shared_session 
-          ? 'All members share the same timer' 
-          : 'Sync timer for all members (Host only)'}
+        {room?.is_shared_session
+          ? 'Everyone runs their own timer and competes on focus time'
+          : 'Start a shared competition clock (Host only)'}
       </p>
     </div>
   );

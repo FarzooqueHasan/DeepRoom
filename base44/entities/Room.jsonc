@@ -24,7 +24,7 @@
     "is_shared_session": {
       "type": "boolean",
       "default": false,
-      "description": "Whether timer is synchronized for all members"
+      "description": "Whether the room competition is active"
     },
     "require_camera": {
       "type": "boolean",
@@ -43,6 +43,7 @@
         "50_10",
         "deep_work",
         "custom",
+        "stopwatch",
         "none"
       ],
       "default": "none"

@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from '@/components/ui/label';
 import { toast } from 'react-hot-toast';
 import { syncLocalToFirestore } from '@/firebase/firestore';
+import { formatSessionDuration } from '@/lib/studySessions';
 
 export default function Home() {
   const { user, openAuthModal, isAuthenticated } = useAuth();
@@ -216,12 +217,12 @@ export default function Home() {
     }
   };
 
-  const formatTime = (minutes) => {
-    if (!minutes) return '0h';
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    if (hours === 0) return `${mins}m`;
-    return `${hours}h ${mins}m`;
+  const formatTime = (minutes, seconds) => {
+    const totalSecs =
+      seconds !== undefined && seconds !== null
+        ? Number(seconds)
+        : Math.round((Number(minutes) || 0) * 60);
+    return formatSessionDuration(totalSecs);
   };
 
   const getRoomMemberCount = (room) => {
@@ -270,12 +271,16 @@ export default function Home() {
           >
             <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 text-center">
               <Clock className="w-5 h-5 text-zinc-500 mx-auto mb-2" />
-              <p className="text-2xl font-light">{formatTime(userStats.total_study_minutes)}</p>
+              <p className="text-2xl font-light">
+                {formatTime(userStats.total_study_minutes, userStats.total_study_seconds)}
+              </p>
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Total Study</p>
             </div>
             <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 text-center">
               <Shield className="w-5 h-5 text-emerald-500 mx-auto mb-2" />
-              <p className="text-2xl font-light text-emerald-500">{formatTime(userStats.verified_focus_minutes)}</p>
+              <p className="text-2xl font-light text-emerald-500">
+                {formatTime(userStats.verified_focus_minutes, userStats.verified_focus_seconds)}
+              </p>
               <p className="text-xs text-zinc-500 uppercase tracking-wider">Verified Focus</p>
             </div>
             <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4 text-center">

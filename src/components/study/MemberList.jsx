@@ -15,27 +15,35 @@ const StatusIndicator = ({ status }) => {
   );
 };
 
-const StatusTimer = ({ sessionStartedAt, lastActive, status, elapsedSeconds }) => {
+const StatusTimer = ({ sessionStartedAt, lastActive, status, elapsedSeconds, isCurrentUser, liveUserSeconds }) => {
   const [elapsed, setElapsed] = useState('');
 
+  const formatSecs = (s) => {
+    const total = Math.max(0, Math.floor(s || 0));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${seconds}s`;
+    }
+    if (minutes > 0) {
+      return `${minutes}m ${seconds}s`;
+    }
+    return `${seconds}s`;
+  };
+
   useEffect(() => {
-    // If paused, freeze elapsed time display immediately!
-    if (status === 'paused') {
-      const secs = elapsedSeconds || 0;
-      const hours = Math.floor(secs / 3600);
-      const minutes = Math.floor((secs % 3600) / 60);
-      const seconds = secs % 60;
-      if (hours > 0) {
-        setElapsed(`${hours}h ${minutes}m`);
-      } else if (minutes > 0) {
-        setElapsed(`${minutes}m ${seconds}s`);
-      } else {
-        setElapsed(`${seconds}s`);
-      }
+    // If current user is studying or paused, keep in 1:1 real-time sync with total timer!
+    if (isCurrentUser && liveUserSeconds !== null && liveUserSeconds !== undefined && (status === 'studying' || status === 'paused')) {
+      setElapsed(formatSecs(liveUserSeconds));
       return;
     }
 
-    // When studying, base on sessionStartedAt so it tallies with central timer and never resets on button clicks
+    if (status === 'paused') {
+      setElapsed(formatSecs(elapsedSeconds || 0));
+      return;
+    }
+
     const baseTime = (status === 'studying' && sessionStartedAt) ? sessionStartedAt : lastActive;
     if (!baseTime) {
       setElapsed('');
@@ -61,24 +69,13 @@ const StatusTimer = ({ sessionStartedAt, lastActive, status, elapsedSeconds }) =
         return;
       }
       
-      // For studying/break, show duration
-      const hours = Math.floor(diff / 3600);
-      const minutes = Math.floor((diff % 3600) / 60);
-      const seconds = diff % 60;
-      
-      if (hours > 0) {
-        setElapsed(`${hours}h ${minutes}m`);
-      } else if (minutes > 0) {
-        setElapsed(`${minutes}m ${seconds}s`);
-      } else {
-        setElapsed(`${seconds}s`);
-      }
+      setElapsed(formatSecs(diff));
     };
 
     updateElapsed();
     const interval = setInterval(updateElapsed, 1000);
     return () => clearInterval(interval);
-  }, [sessionStartedAt, lastActive, status, elapsedSeconds]);
+  }, [sessionStartedAt, lastActive, status, elapsedSeconds, isCurrentUser, liveUserSeconds]);
 
   if (!elapsed) return null;
 
@@ -106,14 +103,24 @@ const FocusBadge = ({ score, cameraEnabled }) => {
   );
 };
 
-export default function MemberList({ members = [], currentUserId }) {
+export default function MemberList({ members = [], currentUserId, competitionActive = false, activeUserElapsedSeconds = null }) {
   // Store minimized user ids so sharing feeds are visible by default
   const [minimizedCameras, setMinimizedCameras] = useState({});
   
+  const getFocusSeconds = (member) => {
+    if (member.status === 'paused') return member.elapsed_seconds || 0;
+    if (member.status !== 'studying' || !member.session_started_at) return 0;
+    return Math.max(0, Math.floor((Date.now() - new Date(member.session_started_at).getTime()) / 1000));
+  };
+
   const sortedMembers = [...members].sort((a, b) => {
     const statusOrder = { studying: 0, paused: 1, break: 2, offline: 3 };
-    return (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
+    const statusDifference = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3);
+    if (statusDifference !== 0) return statusDifference;
+    return getFocusSeconds(b) - getFocusSeconds(a);
   });
+
+  const activeMembers = sortedMembers.filter((member) => ['studying', 'paused'].includes(member.status));
 
   const statusLabels = {
     studying: 'Studying',
@@ -133,7 +140,7 @@ export default function MemberList({ members = [], currentUserId }) {
     <div className="bg-zinc-900/50 rounded-xl border border-zinc-800 p-4">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-zinc-400 text-xs uppercase tracking-wider">
-          Room Members ({members.length})
+          {competitionActive ? 'Focus Competition' : 'Room Members'} ({members.length})
         </h3>
       </div>
 
@@ -142,6 +149,9 @@ export default function MemberList({ members = [], currentUserId }) {
           {sortedMembers.map((member) => {
             const isSharingCamera = member.camera_enabled && member.camera_share_enabled;
             const isMinimized = minimizedCameras[member.user_id];
+            const competitionRank = competitionActive
+              ? activeMembers.findIndex((activeMember) => activeMember.user_id === member.user_id) + 1
+              : 0;
 
             return (
               <motion.div
@@ -164,6 +174,9 @@ export default function MemberList({ members = [], currentUserId }) {
                     
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
+                        {competitionRank > 0 && (
+                          <span className="text-[10px] font-mono text-emerald-400">#{competitionRank}</span>
+                        )}
                         <span className="text-zinc-100 text-sm font-medium truncate">
                           {member.user_name || 'Anonymous'}
                           {member.user_id === currentUserId && (
@@ -181,7 +194,9 @@ export default function MemberList({ members = [], currentUserId }) {
                           sessionStartedAt={member.session_started_at}
                           lastActive={member.last_active} 
                           status={member.status}
-                          elapsedSeconds={member.elapsed_seconds}
+                          elapsedSeconds={member.user_id === currentUserId && activeUserElapsedSeconds !== null ? activeUserElapsedSeconds : member.elapsed_seconds}
+                          isCurrentUser={member.user_id === currentUserId}
+                          liveUserSeconds={member.user_id === currentUserId ? activeUserElapsedSeconds : null}
                         />
                       </div>
                       
